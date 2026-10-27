@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
 import {createEventsService} from './events.ts';
-import {fetchEvents, LatticeError, MAX_PAGES, resolveTarget, type LatticeConfig} from './lattice.ts';
+import {fetchEvents, LatticeError, listTypes, MAX_PAGES, resolveTarget, type LatticeConfig} from './lattice.ts';
 import {EVENT_FIELDS, json, routeFetch} from './test-utils.ts';
 
 const cfg: LatticeConfig = {baseUrl: 'http://lattice.test/api', apiKey: 'lat_secret', contentTypeSlug: 'event'};
@@ -110,6 +110,51 @@ describe('resolveTarget', () => {
   });
 });
 
+describe('picker support', () => {
+  const blog = {name: 'Blog', fields: [{name: 'body', data_type: 'string', required: true}]};
+  const gig = {name: 'Gig', fields: [
+    {name: 'name', data_type: 'string', required: true}, {name: 'starts_at', data_type: 'string', required: true},
+    {name: 'ends_at', data_type: 'string', required: true}]};
+  const two = {
+    '/delivery/content-types/': json([{name: 'Blog', slug: 'blog'}, {name: 'Gig', slug: 'gig'}]),
+    '/delivery/content-types/blog/': json(blog),
+    '/delivery/content-types/gig/': json(gig),
+  };
+
+  it('listTypes marks which types can be shown on a calendar', async () => {
+    expect(await listTypes({baseUrl: cfg.baseUrl, apiKey: 'lat_k'}, asFetch(routeFetch(two)))).toEqual({
+      discoveryAvailable: true,
+      types: [{slug: 'blog', name: 'Blog', calendarShaped: false}, {slug: 'gig', name: 'Gig', calendarShaped: true}],
+    });
+  });
+
+  it('listTypes reports when Lattice has no discovery routes', async () => {
+    expect(await listTypes(cfg, asFetch(routeFetch({})))).toEqual({types: [], discoveryAvailable: false});
+  });
+
+  it('a picked type beats the configured slug, and overrides apply only to the configured type', async () => {
+    const withOverride: LatticeConfig = {baseUrl: cfg.baseUrl, apiKey: 'lat_k', contentTypeSlug: 'event', fieldOverrides: {title: 'venue'}};
+    const f = routeFetch({...two, '/delivery/content-types/event/': json(eventType)});
+    const picked = await resolveTarget(withOverride, asFetch(f), 'gig');
+    expect(picked).toMatchObject({slug: 'gig', fieldMap: {title: 'name'}}); // override title=venue NOT applied
+    const configured = await resolveTarget(withOverride, asFetch(f));
+    expect(configured).toMatchObject({slug: 'event', fieldMap: {title: 'venue'}}); // override applied
+  });
+
+  it('a picked slug Lattice does not know is a not_found error', async () => {
+    await expect(resolveTarget({baseUrl: cfg.baseUrl, apiKey: 'lat_k'}, asFetch(routeFetch({...two, '/delivery/content-types/zzz/': json({}, 404)})), 'zzz'))
+      .rejects.toMatchObject({code: 'not_found'});
+  });
+
+  it('fetchEvents reads the picked type\'s entries', async () => {
+    const f = routeFetch({...two, '/gig/entries/': json({next: null, results: [
+      {id: 5, data: {name: 'Jazz', starts_at: '2026-11-07T19:00:00+05:30', ends_at: '2026-11-07T22:00:00+05:30'}}]})});
+    const out = await fetchEvents({baseUrl: cfg.baseUrl, apiKey: 'lat_k'}, asFetch(f), 'gig');
+    expect(out.events[0]).toMatchObject({id: '5', title: 'Jazz'});
+    expect(out.source.slug).toBe('gig');
+  });
+});
+
 describe('createEventsService', () => {
   const ok = {events: [], skipped: [], truncated: false, fetchedAt: 'x', source: {contentType: 'Event', slug: 'event', discovered: true}};
   it('caches within the TTL, shares in-flight fetches, and does not cache errors', async () => {
@@ -127,6 +172,14 @@ describe('createEventsService', () => {
     t = 100_000;
     expect(await get()).toEqual({status: 502, body: {error: {code: 'upstream', message: 'down'}}});
     expect((await get()).status).toBe(200); // error was not cached
+  });
+
+  it('caches each content type separately', async () => {
+    const fetcher = vi.fn().mockResolvedValue(ok);
+    const get = createEventsService(cfg, 30_000, fetcher, () => 0);
+    await get(); await get({type: 'gig'}); await get({type: 'gig'}); await get();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.map((c) => c[2])).toEqual([undefined, 'gig']);
   });
 
   it('lets fresh bypass the TTL but not the 5s floor', async () => {

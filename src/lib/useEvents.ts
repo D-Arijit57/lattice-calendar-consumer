@@ -15,10 +15,11 @@ export interface EventsState {
 }
 
 /**
- * Loads events on mount and again when the tab regains focus after STALE_AFTER_MS.
+ * Loads events for `type` (undefined = server default) on mount and whenever it changes,
+ * and again and again when the tab regains focus after STALE_AFTER_MS.
  * A failed refresh keeps the last good data on screen and reports the error separately.
  */
-export function useEvents(): EventsState {
+export function useEvents(type?: string): EventsState {
   const [data, setData] = useState<EventsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(true);
@@ -31,7 +32,7 @@ export function useEvents(): EventsState {
     controller.current = c;
     setRefreshing(true);
     try {
-      const d = await loadEvents({fresh, signal: c.signal});
+      const d = await loadEvents({type, fresh, signal: c.signal});
       setData(d);
       setError(null);
       lastLoaded.current = Date.now();
@@ -41,9 +42,12 @@ export function useEvents(): EventsState {
     } finally {
       if (controller.current === c) setRefreshing(false);
     }
-  }, []);
+  }, [type]);
 
   useEffect(() => {
+    // A different content type is a different calendar: drop the old one instead of showing it stale.
+    setData(null);
+    setError(null);
     void load(false);
     const onVisible = () => {
       if (document.visibilityState === 'visible' && Date.now() - lastLoaded.current > STALE_AFTER_MS) void load(false);

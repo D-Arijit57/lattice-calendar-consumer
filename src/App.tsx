@@ -3,7 +3,9 @@ import {useCallback, useMemo, useRef, useState} from 'react';
 import {CalendarView, type ViewName} from './components/CalendarView.tsx';
 import {EventPanel} from './components/EventPanel.tsx';
 import {ErrorBanner, Overlay, SkippedNotice} from './components/Notices.tsx';
+import {TypePicker} from './components/TypePicker.tsx';
 import {useEvents} from './lib/useEvents.ts';
+import {readStoredType, storeType, useTypes} from './lib/useTypes.ts';
 
 const VIEWS: {id: ViewName; label: string}[] = [
   {id: 'dayGridMonth', label: 'Month'},
@@ -16,7 +18,10 @@ const initialView: ViewName = window.matchMedia('(max-width: 639px)').matches ? 
 
 export default function App() {
   const calendar = useRef<FullCalendar>(null);
-  const {data, loading, refreshing, error, refresh} = useEvents();
+  const types = useTypes();
+  // The user's pick (remembered per browser). Undefined = let the server choose.
+  const [pickedType, setPickedType] = useState<string | undefined>(readStoredType);
+  const {data, loading, refreshing, error, refresh} = useEvents(pickedType);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nav, setNav] = useState<{title: string; view: ViewName; isToday: boolean}>({title: '', view: initialView, isToday: true});
 
@@ -24,6 +29,15 @@ export default function App() {
   const selected = useMemo(() => events.find((e) => e.id === selectedId) ?? null, [events, selectedId]);
   const api = () => calendar.current?.getApi();
   const closePanel = useCallback(() => setSelectedId(null), []);
+  const pick = (slug: string) => {
+    setSelectedId(null);
+    setPickedType(slug);
+    storeType(slug);
+  };
+  // A remembered pick can go stale (type deleted/renamed in Lattice): fall back to the server's choice.
+  const knownTypes = types?.discoveryAvailable ? types.types : [];
+  const stalePick = !!pickedType && knownTypes.length > 0 && !knownTypes.some((t) => t.slug === pickedType && t.calendarShaped);
+  if (stalePick) setPickedType(undefined);
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col gap-4 px-4 py-5 sm:px-6">
@@ -41,9 +55,12 @@ export default function App() {
             </p>
           </div>
         </div>
-        <button type="button" className="btn-secondary" onClick={refresh} disabled={refreshing} aria-live="polite">
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <TypePicker types={knownTypes} value={pickedType ?? data?.source.slug ?? ''} onChange={pick} />
+          <button type="button" className="btn-secondary" onClick={refresh} disabled={refreshing} aria-live="polite">
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center justify-between gap-3">

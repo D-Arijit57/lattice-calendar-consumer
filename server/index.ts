@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {extname, join, normalize, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {loadConfig} from './config.ts';
-import {createEventsService} from './events.ts';
+import {createApiHandler} from './handler.ts';
 
 try {
   process.loadEnvFile(); // .env in the working directory; real env vars win
@@ -13,13 +13,13 @@ try {
 
 let config;
 try {
-  config = loadConfig();
+  config = loadConfig(); // fail fast at startup; the handler re-reads the same environment
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
 }
 
-const getEvents = createEventsService(config.lattice, config.cacheTtlMs);
+const api = createApiHandler();
 const DIST = resolve(fileURLToPath(new URL('../dist', import.meta.url)));
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -35,19 +35,10 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const secure = {'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer'};
 
-  if (url.pathname === '/api/events') {
-    if (req.method !== 'GET') {
-      res.writeHead(405, {Allow: 'GET', ...secure}).end();
-      return;
-    }
-    const result = await getEvents({fresh: url.searchParams.has('fresh')});
-    res.writeHead(result.status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...secure});
-    res.end(JSON.stringify(result.body));
-    return;
-  }
   if (url.pathname.startsWith('/api/')) {
-    res.writeHead(404, {'Content-Type': 'application/json', ...secure});
-    res.end(JSON.stringify({error: {code: 'not_found', message: 'Unknown API route.'}}));
+    const r = await api(new Request(url, {method: req.method}));
+    res.writeHead(r.status, Object.fromEntries(r.headers));
+    res.end(await r.text());
     return;
   }
 

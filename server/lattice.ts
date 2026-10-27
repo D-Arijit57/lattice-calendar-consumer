@@ -1,6 +1,6 @@
 import {DEFAULT_FIELD_MAP, normalizeEntry, type FieldMap} from '../shared/normalize.ts';
 import {isCalendarShaped, resolveFieldMap, suggestFieldMap, type SchemaField} from '../shared/suggest.ts';
-import type {EventsResponse} from '../shared/types.ts';
+import type {ContentTypeOption, EventsResponse, TypesResponse} from '../shared/types.ts';
 
 export interface LatticeConfig {
   baseUrl: string; // e.g. http://localhost:8000/api (no trailing slash)
@@ -92,26 +92,53 @@ async function describeType(cfg: LatticeConfig, slug: string, fetchImpl: FetchLi
   return {name: typeof body.name === 'string' ? body.name : null, fields: body.fields as SchemaField[]};
 }
 
+/** Lists the key's content types and whether each could be shown on a calendar. */
+export async function listTypes(cfg: LatticeConfig, fetchImpl: FetchLike = fetch): Promise<TypesResponse> {
+  const list = await get(cfg, typesUrl(cfg), fetchImpl);
+  if (list.status === 404) return {types: [], discoveryAvailable: false};
+  const types = (await json(list)) as {name: string; slug: string}[];
+  if (!Array.isArray(types)) throw new LatticeError('upstream', 'Lattice returned an unexpected response shape.', 502);
+
+  const out: ContentTypeOption[] = [];
+  for (const [i, t] of types.entries()) {
+    // Past the scan limit we list the type but do not inspect it, so it is not selectable.
+    let shaped = false;
+    if (i < MAX_TYPES_SCANNED) {
+      const d = await describeType(cfg, t.slug, fetchImpl);
+      shaped = isCalendarShaped(suggestFieldMap(d.fields), overridesFor(cfg, t.slug));
+    }
+    out.push({slug: t.slug, name: t.name, calendarShaped: shaped});
+  }
+  return {types: out, discoveryAvailable: true};
+}
+
+/** Explicit overrides describe the configured type, so they are not applied to a type the user picked instead. */
+function overridesFor(cfg: LatticeConfig, slug: string): Partial<FieldMap> {
+  return !cfg.contentTypeSlug || cfg.contentTypeSlug === slug ? (cfg.fieldOverrides ?? {}) : {};
+}
+
 /**
  * Decides which content type to read and which fields are title/start/end/….
+ * `requestedSlug` (the user's pick) beats the configured slug, which beats auto-detection.
  * Uses Lattice's discovery routes when present, and falls back to configuration
  * (slug default "event", default field names) when they are not, so older Lattice versions still work.
  */
-export async function resolveTarget(cfg: LatticeConfig, fetchImpl: FetchLike = fetch): Promise<Target> {
-  const overrides = cfg.fieldOverrides ?? {};
+export async function resolveTarget(cfg: LatticeConfig, fetchImpl: FetchLike = fetch, requestedSlug?: string): Promise<Target> {
+  const pinned = requestedSlug ?? cfg.contentTypeSlug;
   const list = await get(cfg, typesUrl(cfg), fetchImpl);
 
   if (list.status === 404) {
-    return {slug: cfg.contentTypeSlug ?? FALLBACK_SLUG, name: null, fieldMap: resolveFieldMap({}, overrides), discovered: false};
+    return {slug: pinned ?? FALLBACK_SLUG, name: null, fieldMap: resolveFieldMap({}, overridesFor(cfg, pinned ?? FALLBACK_SLUG)), discovered: false};
   }
   const types = (await json(list)) as {name: string; slug: string}[];
   if (!Array.isArray(types)) throw new LatticeError('upstream', 'Lattice returned an unexpected response shape.', 502);
 
-  if (cfg.contentTypeSlug) {
-    const d = await describeType(cfg, cfg.contentTypeSlug, fetchImpl);
-    return {slug: cfg.contentTypeSlug, name: d.name, fieldMap: resolveFieldMap(suggestFieldMap(d.fields), overrides), discovered: true};
+  if (pinned) {
+    const d = await describeType(cfg, pinned, fetchImpl);
+    return {slug: pinned, name: d.name, fieldMap: resolveFieldMap(suggestFieldMap(d.fields), overridesFor(cfg, pinned)), discovered: true};
   }
 
+  const overrides = cfg.fieldOverrides ?? {};
   const candidates: Target[] = [];
   for (const t of types.slice(0, MAX_TYPES_SCANNED)) {
     const d = await describeType(cfg, t.slug, fetchImpl);
@@ -145,8 +172,8 @@ async function getPage(cfg: LatticeConfig, slug: string, cursor: string | null, 
 }
 
 /** Resolves the target, fetches every page of its entries and normalizes them. */
-export async function fetchEvents(cfg: LatticeConfig, fetchImpl: FetchLike = fetch): Promise<EventsResponse> {
-  const target = await resolveTarget(cfg, fetchImpl);
+export async function fetchEvents(cfg: LatticeConfig, fetchImpl: FetchLike = fetch, requestedSlug?: string): Promise<EventsResponse> {
+  const target = await resolveTarget(cfg, fetchImpl, requestedSlug);
   const events: EventsResponse['events'] = [];
   const skipped: EventsResponse['skipped'] = [];
   const seenCursors = new Set<string>();

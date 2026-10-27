@@ -34,3 +34,18 @@ export interface EventsResponse {
 export interface ApiError {
   error: { code: string; message: string };
 }
+
+/** One content type in the organization, as shown in the picker. */
+export interface ContentTypeOption {
+  slug: string;
+  name: string;
+  /** True if it has fields that can fill title, start and end. */
+  calendarShaped: boolean;
+}
+
+/** Body of GET /api/types. */
+export interface TypesResponse {
+  types: ContentTypeOption[];
+  /** False when Lattice has no discovery routes: the picker is then unavailable. */
+  discoveryAvailable: boolean;
+}

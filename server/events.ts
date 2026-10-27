@@ -1,41 +1,56 @@
-import type {ApiError, EventsResponse} from '../shared/types.ts';
-import {fetchEvents, LatticeError, type LatticeConfig} from './lattice.ts';
+import type {ApiError, EventsResponse, TypesResponse} from '../shared/types.ts';
+import {fetchEvents, LatticeError, listTypes, type LatticeConfig} from './lattice.ts';
 
-type Fetcher = typeof fetchEvents;
+export type Result<T> = {status: 200; body: T} | {status: number; body: ApiError};
 
 const MIN_FRESH_GAP_MS = 5_000;
 
-export type EventsResult =
-  | {status: 200; body: EventsResponse}
-  | {status: number; body: ApiError};
+type Loader<T> = (cfg: LatticeConfig, key: string) => Promise<T>;
 
 /**
- * Serves /api/events with a short in-memory cache. Concurrent callers share one in-flight
- * Lattice fetch, so N browsers refreshing cost one upstream request per TTL, which keeps us
- * far below Lattice's 60 requests/minute/key limit. Errors are not cached.
+ * TTL cache keyed by string, with in-flight sharing: concurrent callers for the same key share one
+ * Lattice fetch, so N browsers refreshing cost one upstream request per TTL, far below Lattice's
+ * 60 requests/minute/key limit. Errors are never cached, so only slugs Lattice accepted are stored.
  */
-export function createEventsService(cfg: LatticeConfig, ttlMs: number, fetcher: Fetcher = fetchEvents, now = Date.now) {
-  let cached: {at: number; value: EventsResponse} | null = null;
-  let inflight: Promise<EventsResponse> | null = null;
+function cachedBy<T>(cfg: LatticeConfig, ttlMs: number, load: Loader<T>, now: () => number) {
+  const cache = new Map<string, {at: number; value: T}>();
+  const inflight = new Map<string, Promise<T>>();
 
-  return async function getEvents(opts: {fresh?: boolean} = {}): Promise<EventsResult> {
+  return async function get(key: string, opts: {fresh?: boolean} = {}): Promise<Result<T>> {
+    const hit = cache.get(key);
     // `fresh` (the Refresh button) skips the TTL but not MIN_FRESH_GAP_MS, so a client cannot
     // use it to drive unbounded upstream traffic.
-    const age = cached ? now() - cached.at : Infinity;
-    if (cached && age < (opts.fresh ? MIN_FRESH_GAP_MS : ttlMs)) return {status: 200, body: cached.value};
+    const age = hit ? now() - hit.at : Infinity;
+    if (hit && age < (opts.fresh ? MIN_FRESH_GAP_MS : ttlMs)) return {status: 200, body: hit.value};
     try {
-      inflight ??= fetcher(cfg).finally(() => {
-        inflight = null;
-      });
-      const value = await inflight;
-      cached = {at: now(), value};
+      let p = inflight.get(key);
+      if (!p) {
+        p = load(cfg, key).finally(() => inflight.delete(key));
+        inflight.set(key, p);
+      }
+      const value = await p;
+      cache.set(key, {at: now(), value});
       return {status: 200, body: value};
     } catch (err) {
       if (err instanceof LatticeError) {
         return {status: err.status, body: {error: {code: err.code, message: err.message}}};
       }
-      console.error('Unexpected error fetching events:', err instanceof Error ? err.message : err);
+      console.error('Unexpected error talking to Lattice:', err instanceof Error ? err.message : err);
       return {status: 500, body: {error: {code: 'internal', message: 'Unexpected server error.'}}};
     }
   };
+}
+
+type EventsFetcher = typeof fetchEvents;
+
+/** Events for the chosen content type (`""` = configured / auto-detected). */
+export function createEventsService(cfg: LatticeConfig, ttlMs: number, fetcher: EventsFetcher = fetchEvents, now = Date.now) {
+  const get = cachedBy<EventsResponse>(cfg, ttlMs, (c, slug) => fetcher(c, fetch, slug || undefined), now);
+  return (opts: {fresh?: boolean; type?: string} = {}) => get(opts.type ?? '', opts);
+}
+
+/** The picker's list of content types. */
+export function createTypesService(cfg: LatticeConfig, ttlMs: number, lister: typeof listTypes = listTypes, now = Date.now) {
+  const get = cachedBy<TypesResponse>(cfg, ttlMs, (c) => lister(c), now);
+  return () => get('types');
 }
