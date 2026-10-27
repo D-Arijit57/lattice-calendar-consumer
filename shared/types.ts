@@ -26,6 +26,8 @@ export interface EventsResponse {
   /** True if the page cap was hit, so older entries are missing. */
   truncated: boolean;
   fetchedAt: string;
+  /** Which Lattice content type these events came from. */
+  source: {contentType: string; slug: string; discovered: boolean};
 }
 
 /** Body of every non-2xx response from this app's API. */

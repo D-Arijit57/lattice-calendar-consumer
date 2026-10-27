@@ -24,10 +24,16 @@ Production-style: `npm run build && npm start` serves the UI and API together on
 |---|---|
 | `LATTICE_API_BASE_URL` | Lattice API base incl. `/api`, e.g. `http://localhost:8000/api` |
 | `LATTICE_API_KEY` | Read-only key (`lat_…`). Server-only; none of these variables are `VITE_*`. |
-| `LATTICE_EVENT_CONTENT_TYPE` | Slug of the Event content type (default `event`) |
-| `LATTICE_FIELD_MAP` | Optional JSON mapping calendar roles (`title`, `start`, `end`, `description`, `location`, `category`) to your Lattice field names, e.g. `{"title":"name","start":"starts_at"}`. Unlisted roles keep the defaults. |
+| `LATTICE_EVENT_CONTENT_TYPE` | Optional. Slug to pin. If unset, the server discovers a content type that has a title plus start/end fields (preferring slug `event`). Without discovery routes in Lattice, defaults to `event`. |
+| `LATTICE_FIELD_MAP` | Optional JSON that **overrides** discovered/default mappings of calendar roles (`title`, `start`, `end`, `description`, `location`, `category`) to your Lattice field names, e.g. `{"title":"name","start":"starts_at"}`. Unlisted roles keep the defaults. |
 | `PORT` | Server port (default 3002) |
 | `EVENTS_CACHE_TTL_SECONDS` | Server cache for `/api/events` (default 30) |
+
+## How the calendar finds your events
+
+If your Lattice has the delivery discovery routes (`GET /api/delivery/content-types/` and `/<slug>/`), the server uses them with the same API key: it lists the organization's content types, reads each one's latest field schema, and picks the one shaped like an event (a title plus start and end `string` fields, matched by name, e.g. `start_time`, `starts_at`, `begin`). The header shows which type was chosen. Precedence for each field role: `LATTICE_FIELD_MAP` > detected name > default name. Pin a type with `LATTICE_EVENT_CONTENT_TYPE`.
+
+Older Lattice versions without those routes still work: the slug defaults to `event` and field names to the defaults below, both overridable with the two variables.
 
 ## Event content type in Lattice
 
@@ -66,6 +72,7 @@ The 30 s cache is per warm function instance. The function itself has only been 
 
 ## Limitations
 
+- Auto-detection is name-based heuristics over `string` fields (Lattice has no date-time type), at most 10 content types are scanned, and there is no in-app picker yet: pin a type or map fields with the env variables when guessing is wrong.
 - No update/delete in Lattice V1, so changes are seen as new entries only.
 - Only the newest 1,000 entries are loaded; no server-side date filtering exists.
 - Every entry in the organization's Event type is shown (no draft/published in Lattice V1).

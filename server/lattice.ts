@@ -1,21 +1,26 @@
 import {DEFAULT_FIELD_MAP, normalizeEntry, type FieldMap} from '../shared/normalize.ts';
+import {isCalendarShaped, resolveFieldMap, suggestFieldMap, type SchemaField} from '../shared/suggest.ts';
 import type {EventsResponse} from '../shared/types.ts';
 
 export interface LatticeConfig {
   baseUrl: string; // e.g. http://localhost:8000/api (no trailing slash)
   apiKey: string;
-  contentTypeSlug: string;
-  /** Optional; defaults to Lattice fields named title/start_time/end_time/… */
-  fieldMap?: FieldMap;
+  /** Pin the content type. Unset = discover one that looks like events. */
+  contentTypeSlug?: string;
+  /** Explicit role -> field name overrides; they win over anything discovered. */
+  fieldOverrides?: Partial<FieldMap>;
 }
 
 /** Upper bound on pages per refresh: 20 x 50 = 1000 entries. Keeps one refresh well under the 60/min key limit. */
 export const MAX_PAGES = 20;
+/** At most this many content types are inspected when auto-detecting. */
+const MAX_TYPES_SCANNED = 10;
+const FALLBACK_SLUG = 'event';
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export class LatticeError extends Error {
   constructor(
-    public code: 'unauthorized' | 'not_found' | 'rate_limited' | 'upstream' | 'unreachable',
+    public code: 'unauthorized' | 'not_found' | 'no_event_type' | 'rate_limited' | 'upstream' | 'unreachable',
     message: string,
     public status: number,
   ) {
@@ -24,6 +29,15 @@ export class LatticeError extends Error {
 }
 
 type FetchLike = typeof fetch;
+
+/** What we are reading and how its fields map onto calendar roles. */
+export interface Target {
+  slug: string;
+  name: string | null;
+  fieldMap: FieldMap;
+  /** False when Lattice has no discovery routes and we fell back to configuration/defaults. */
+  discovered: boolean;
+}
 
 /**
  * Lattice's `next` link is an absolute URL built from the request's Host header, which can be
@@ -40,10 +54,8 @@ function cursorFromNext(next: unknown): string | null {
   }
 }
 
-async function getPage(cfg: LatticeConfig, cursor: string | null, fetchImpl: FetchLike) {
-  const url = new URL(`${cfg.baseUrl}/delivery/content-types/${encodeURIComponent(cfg.contentTypeSlug)}/entries/`);
-  if (cursor) url.searchParams.set('cursor', cursor);
-
+/** GETs a Lattice URL. Maps auth/rate/server/network failures to LatticeError; 404 and 2xx are returned to the caller. */
+async function get(cfg: LatticeConfig, url: URL, fetchImpl: FetchLike): Promise<Response> {
   let res: Response;
   try {
     res = await fetchImpl(url, {
@@ -53,35 +65,88 @@ async function getPage(cfg: LatticeConfig, cursor: string | null, fetchImpl: Fet
   } catch {
     throw new LatticeError('unreachable', 'Could not reach the Lattice API.', 502);
   }
-
   if (res.status === 401 || res.status === 403) {
     throw new LatticeError('unauthorized', 'Lattice rejected the API key (invalid or revoked).', 502);
   }
-  if (res.status === 404) {
-    throw new LatticeError('not_found', `Content type "${cfg.contentTypeSlug}" was not found for this API key.`, 502);
-  }
-  if (res.status === 429) {
-    throw new LatticeError('rate_limited', 'Lattice rate limit reached. Try again shortly.', 503);
-  }
-  if (!res.ok) {
-    throw new LatticeError('upstream', `Lattice returned HTTP ${res.status}.`, 502);
-  }
+  if (res.status === 429) throw new LatticeError('rate_limited', 'Lattice rate limit reached. Try again shortly.', 503);
+  if (res.status !== 404 && !res.ok) throw new LatticeError('upstream', `Lattice returned HTTP ${res.status}.`, 502);
+  return res;
+}
 
-  let body: unknown;
+async function json(res: Response): Promise<unknown> {
   try {
-    body = await res.json();
+    return await res.json();
   } catch {
     throw new LatticeError('upstream', 'Lattice returned a non-JSON response.', 502);
   }
-  const page = body as {results?: unknown; next?: unknown};
+}
+
+const typesUrl = (cfg: LatticeConfig, slug?: string) =>
+  new URL(`${cfg.baseUrl}/delivery/content-types/${slug ? `${encodeURIComponent(slug)}/` : ''}`);
+
+async function describeType(cfg: LatticeConfig, slug: string, fetchImpl: FetchLike) {
+  const res = await get(cfg, typesUrl(cfg, slug), fetchImpl);
+  if (res.status === 404) throw new LatticeError('not_found', `Content type "${slug}" was not found for this API key.`, 502);
+  const body = (await json(res)) as {name?: unknown; fields?: unknown};
+  if (!Array.isArray(body.fields)) throw new LatticeError('upstream', 'Lattice returned an unexpected response shape.', 502);
+  return {name: typeof body.name === 'string' ? body.name : null, fields: body.fields as SchemaField[]};
+}
+
+/**
+ * Decides which content type to read and which fields are title/start/end/….
+ * Uses Lattice's discovery routes when present, and falls back to configuration
+ * (slug default "event", default field names) when they are not, so older Lattice versions still work.
+ */
+export async function resolveTarget(cfg: LatticeConfig, fetchImpl: FetchLike = fetch): Promise<Target> {
+  const overrides = cfg.fieldOverrides ?? {};
+  const list = await get(cfg, typesUrl(cfg), fetchImpl);
+
+  if (list.status === 404) {
+    return {slug: cfg.contentTypeSlug ?? FALLBACK_SLUG, name: null, fieldMap: resolveFieldMap({}, overrides), discovered: false};
+  }
+  const types = (await json(list)) as {name: string; slug: string}[];
+  if (!Array.isArray(types)) throw new LatticeError('upstream', 'Lattice returned an unexpected response shape.', 502);
+
+  if (cfg.contentTypeSlug) {
+    const d = await describeType(cfg, cfg.contentTypeSlug, fetchImpl);
+    return {slug: cfg.contentTypeSlug, name: d.name, fieldMap: resolveFieldMap(suggestFieldMap(d.fields), overrides), discovered: true};
+  }
+
+  const candidates: Target[] = [];
+  for (const t of types.slice(0, MAX_TYPES_SCANNED)) {
+    const d = await describeType(cfg, t.slug, fetchImpl);
+    const suggested = suggestFieldMap(d.fields);
+    if (isCalendarShaped(suggested, overrides)) {
+      candidates.push({slug: t.slug, name: d.name ?? t.name, fieldMap: resolveFieldMap(suggested, overrides), discovered: true});
+    }
+  }
+  const chosen = candidates.find((c) => c.slug === FALLBACK_SLUG) ?? candidates[0];
+  if (!chosen) {
+    throw new LatticeError(
+      'no_event_type',
+      'No content type with a title and start/end time fields was found. Set LATTICE_EVENT_CONTENT_TYPE and LATTICE_FIELD_MAP.',
+      502,
+    );
+  }
+  return chosen;
+}
+
+async function getPage(cfg: LatticeConfig, slug: string, cursor: string | null, fetchImpl: FetchLike) {
+  const url = new URL(`${typesUrl(cfg, slug)}entries/`);
+  if (cursor) url.searchParams.set('cursor', cursor);
+  const res = await get(cfg, url, fetchImpl);
+  if (res.status === 404) throw new LatticeError('not_found', `Content type "${slug}" was not found for this API key.`, 502);
+
+  const page = (await json(res)) as {results?: unknown; next?: unknown};
   if (!Array.isArray(page.results)) {
     throw new LatticeError('upstream', 'Lattice returned an unexpected response shape.', 502);
   }
   return {results: page.results as unknown[], next: cursorFromNext(page.next)};
 }
 
-/** Fetches every page of the Event content type and normalizes the entries. */
+/** Resolves the target, fetches every page of its entries and normalizes them. */
 export async function fetchEvents(cfg: LatticeConfig, fetchImpl: FetchLike = fetch): Promise<EventsResponse> {
+  const target = await resolveTarget(cfg, fetchImpl);
   const events: EventsResponse['events'] = [];
   const skipped: EventsResponse['skipped'] = [];
   const seenCursors = new Set<string>();
@@ -93,9 +158,9 @@ export async function fetchEvents(cfg: LatticeConfig, fetchImpl: FetchLike = fet
       truncated = true;
       break;
     }
-    const {results, next} = await getPage(cfg, cursor, fetchImpl);
+    const {results, next} = await getPage(cfg, target.slug, cursor, fetchImpl);
     for (const raw of results) {
-      const r = normalizeEntry(raw, cfg.fieldMap ?? DEFAULT_FIELD_MAP);
+      const r = normalizeEntry(raw, target.fieldMap ?? DEFAULT_FIELD_MAP);
       if (r.ok) events.push(r.event);
       else skipped.push({id: r.id, reason: r.reason});
     }
@@ -106,5 +171,11 @@ export async function fetchEvents(cfg: LatticeConfig, fetchImpl: FetchLike = fet
   }
 
   events.sort((a, b) => a.start.localeCompare(b.start) || Number(a.id) - Number(b.id));
-  return {events, skipped, truncated, fetchedAt: new Date().toISOString()};
+  return {
+    events,
+    skipped,
+    truncated,
+    fetchedAt: new Date().toISOString(),
+    source: {contentType: target.name ?? target.slug, slug: target.slug, discovered: target.discovered},
+  };
 }

@@ -36,7 +36,9 @@ export default function App() {
           </span>
           <div>
             <h1 className="font-display text-lg font-semibold leading-tight">Lattice Calendar</h1>
-            <p className="text-xs text-neutral-500">Events delivered from Lattice</p>
+            <p className="text-xs text-neutral-500">
+              {data ? `${data.source.contentType} from Lattice${data.source.discovered ? ' · auto-detected' : ''}` : 'Events delivered from Lattice'}
+            </p>
           </div>
         </div>
         <button type="button" className="btn-secondary" onClick={refresh} disabled={refreshing} aria-live="polite">

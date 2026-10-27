@@ -8,20 +8,20 @@ export interface AppConfig {
 }
 
 /** Parses LATTICE_FIELD_MAP, a JSON object overriding some of the default role -> Lattice field names. */
-function parseFieldMap(raw: string | undefined, problems: string[]): FieldMap {
-  if (!raw?.trim()) return DEFAULT_FIELD_MAP;
+function parseFieldMap(raw: string | undefined, problems: string[]): Partial<FieldMap> {
+  if (!raw?.trim()) return {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     problems.push('LATTICE_FIELD_MAP must be valid JSON, e.g. {"start":"starts_at"}');
-    return DEFAULT_FIELD_MAP;
+    return {};
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     problems.push('LATTICE_FIELD_MAP must be a JSON object');
-    return DEFAULT_FIELD_MAP;
+    return {};
   }
-  const map: FieldMap = {...DEFAULT_FIELD_MAP};
+  const map: Partial<FieldMap> = {};
   for (const [role, field] of Object.entries(parsed)) {
     if (!(role in DEFAULT_FIELD_MAP)) {
       problems.push(`LATTICE_FIELD_MAP has unknown key "${role}" (allowed: ${Object.keys(DEFAULT_FIELD_MAP).join(', ')})`);
@@ -53,8 +53,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     problems.push('LATTICE_API_KEY must be a real Lattice key (starts with "lat_")');
   }
 
-  const slug = (env.LATTICE_EVENT_CONTENT_TYPE ?? 'event').trim();
-  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
+  // Optional: when unset the server discovers a content type that looks like events.
+  const slug = env.LATTICE_EVENT_CONTENT_TYPE?.trim() || undefined;
+  if (slug && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
     problems.push('LATTICE_EVENT_CONTENT_TYPE must be a Lattice slug such as "event"');
   }
 
@@ -64,8 +65,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const ttl = Number(env.EVENTS_CACHE_TTL_SECONDS ?? 30);
   if (!Number.isFinite(ttl) || ttl < 0) problems.push('EVENTS_CACHE_TTL_SECONDS must be >= 0');
 
-  const fieldMap = parseFieldMap(env.LATTICE_FIELD_MAP, problems);
+  const fieldOverrides = parseFieldMap(env.LATTICE_FIELD_MAP, problems);
 
   if (problems.length) throw new Error(`Invalid configuration:\n- ${problems.join('\n- ')}`);
-  return {lattice: {baseUrl, apiKey, contentTypeSlug: slug, fieldMap}, port, cacheTtlMs: ttl * 1000};
+  return {lattice: {baseUrl, apiKey, contentTypeSlug: slug, fieldOverrides}, port, cacheTtlMs: ttl * 1000};
 }
