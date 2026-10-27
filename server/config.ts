@@ -1,9 +1,37 @@
+import {DEFAULT_FIELD_MAP, type FieldMap} from '../shared/normalize.ts';
 import type {LatticeConfig} from './lattice.ts';
 
 export interface AppConfig {
   lattice: LatticeConfig;
   port: number;
   cacheTtlMs: number;
+}
+
+/** Parses LATTICE_FIELD_MAP, a JSON object overriding some of the default role -> Lattice field names. */
+function parseFieldMap(raw: string | undefined, problems: string[]): FieldMap {
+  if (!raw?.trim()) return DEFAULT_FIELD_MAP;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    problems.push('LATTICE_FIELD_MAP must be valid JSON, e.g. {"start":"starts_at"}');
+    return DEFAULT_FIELD_MAP;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    problems.push('LATTICE_FIELD_MAP must be a JSON object');
+    return DEFAULT_FIELD_MAP;
+  }
+  const map: FieldMap = {...DEFAULT_FIELD_MAP};
+  for (const [role, field] of Object.entries(parsed)) {
+    if (!(role in DEFAULT_FIELD_MAP)) {
+      problems.push(`LATTICE_FIELD_MAP has unknown key "${role}" (allowed: ${Object.keys(DEFAULT_FIELD_MAP).join(', ')})`);
+    } else if (typeof field !== 'string' || !field.trim()) {
+      problems.push(`LATTICE_FIELD_MAP["${role}"] must be a non-empty field name`);
+    } else {
+      map[role as keyof FieldMap] = field.trim();
+    }
+  }
+  return map;
 }
 
 /** Reads and validates environment variables. Throws one error listing everything wrong. */
@@ -36,6 +64,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const ttl = Number(env.EVENTS_CACHE_TTL_SECONDS ?? 30);
   if (!Number.isFinite(ttl) || ttl < 0) problems.push('EVENTS_CACHE_TTL_SECONDS must be >= 0');
 
+  const fieldMap = parseFieldMap(env.LATTICE_FIELD_MAP, problems);
+
   if (problems.length) throw new Error(`Invalid configuration:\n- ${problems.join('\n- ')}`);
-  return {lattice: {baseUrl, apiKey, contentTypeSlug: slug}, port, cacheTtlMs: ttl * 1000};
+  return {lattice: {baseUrl, apiKey, contentTypeSlug: slug, fieldMap}, port, cacheTtlMs: ttl * 1000};
 }

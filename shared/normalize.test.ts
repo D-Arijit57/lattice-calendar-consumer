@@ -67,3 +67,13 @@ describe('normalizeEntry', () => {
     expect(normalizeEntry({data: valid}).ok).toBe(false);
   });
 });
+
+describe('custom field map', () => {
+  const map = {title: 'name', start: 'starts_at', end: 'ends_at', description: 'about', location: 'venue', category: 'kind'};
+  it('reads the mapped fields and reports mapped names in errors', () => {
+    const ok = normalizeEntry({id: 3, data: {name: 'Gig', starts_at: '2026-11-03T10:00:00Z', ends_at: '2026-11-03T11:00:00Z', venue: 'Hall', kind: 'music'}}, map);
+    expect(ok).toMatchObject({ok: true, event: {title: 'Gig', location: 'Hall', category: 'music'}});
+    const bad = normalizeEntry({id: 3, data: {name: 'Gig', start_time: '2026-11-03T10:00:00Z'}}, map);
+    expect(bad).toMatchObject({ok: false, reason: expect.stringContaining('starts_at')});
+  });
+});

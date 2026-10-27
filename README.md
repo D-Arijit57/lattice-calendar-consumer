@@ -25,12 +25,13 @@ Production-style: `npm run build && npm start` serves the UI and API together on
 | `LATTICE_API_BASE_URL` | Lattice API base incl. `/api`, e.g. `http://localhost:8000/api` |
 | `LATTICE_API_KEY` | Read-only key (`lat_…`). Server-only; none of these variables are `VITE_*`. |
 | `LATTICE_EVENT_CONTENT_TYPE` | Slug of the Event content type (default `event`) |
+| `LATTICE_FIELD_MAP` | Optional JSON mapping calendar roles (`title`, `start`, `end`, `description`, `location`, `category`) to your Lattice field names, e.g. `{"title":"name","start":"starts_at"}`. Unlisted roles keep the defaults. |
 | `PORT` | Server port (default 3002) |
 | `EVENTS_CACHE_TTL_SECONDS` | Server cache for `/api/events` (default 30) |
 
 ## Event content type in Lattice
 
-Create a content type with slug `event` and these fields, then publish a version. **All six are `string` fields**, because Lattice has no date-time type (`date` is `YYYY-MM-DD` only):
+Create a content type with slug `event` and these fields (or use other names and set `LATTICE_FIELD_MAP`), then publish a version. **All six are `string` fields**, because Lattice has no date-time type (`date` is `YYYY-MM-DD` only):
 
 | Field | Required | Format |
 |---|---|---|

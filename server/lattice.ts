@@ -1,10 +1,12 @@
-import {normalizeEntry} from '../shared/normalize.ts';
+import {DEFAULT_FIELD_MAP, normalizeEntry, type FieldMap} from '../shared/normalize.ts';
 import type {EventsResponse} from '../shared/types.ts';
 
 export interface LatticeConfig {
   baseUrl: string; // e.g. http://localhost:8000/api (no trailing slash)
   apiKey: string;
   contentTypeSlug: string;
+  /** Optional; defaults to Lattice fields named title/start_time/end_time/… */
+  fieldMap?: FieldMap;
 }
 
 /** Upper bound on pages per refresh: 20 x 50 = 1000 entries. Keeps one refresh well under the 60/min key limit. */
@@ -93,7 +95,7 @@ export async function fetchEvents(cfg: LatticeConfig, fetchImpl: FetchLike = fet
     }
     const {results, next} = await getPage(cfg, cursor, fetchImpl);
     for (const raw of results) {
-      const r = normalizeEntry(raw);
+      const r = normalizeEntry(raw, cfg.fieldMap ?? DEFAULT_FIELD_MAP);
       if (r.ok) events.push(r.event);
       else skipped.push({id: r.id, reason: r.reason});
     }

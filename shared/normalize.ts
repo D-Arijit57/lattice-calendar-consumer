@@ -1,5 +1,24 @@
 import type {CalendarEvent} from './types.ts';
 
+/** Which Lattice field name plays each calendar role. */
+export interface FieldMap {
+  title: string;
+  start: string;
+  end: string;
+  description: string;
+  location: string;
+  category: string;
+}
+
+export const DEFAULT_FIELD_MAP: FieldMap = {
+  title: 'title',
+  start: 'start_time',
+  end: 'end_time',
+  description: 'description',
+  location: 'location',
+  category: 'category',
+};
+
 /**
  * Lattice has no date-time field type (`date` is YYYY-MM-DD only), so start_time and
  * end_time are `string` fields and Lattice does not check their format. This module is
@@ -43,7 +62,7 @@ export type NormalizeResult =
   | {ok: false; id: string; reason: string};
 
 /** Turns one raw Delivery API entry into a CalendarEvent, or says why it can't be shown. */
-export function normalizeEntry(raw: unknown): NormalizeResult {
+export function normalizeEntry(raw: unknown, map: FieldMap = DEFAULT_FIELD_MAP): NormalizeResult {
   const entry = (raw ?? {}) as Record<string, unknown>;
   const id = entry.id !== undefined && entry.id !== null ? String(entry.id) : '?';
   const fail = (reason: string): NormalizeResult => ({ok: false, id, reason});
@@ -55,25 +74,26 @@ export function normalizeEntry(raw: unknown): NormalizeResult {
   }
   const d = data as Record<string, unknown>;
 
-  if (typeof d.title !== 'string' || d.title.trim() === '') return fail('title is missing.');
-  const start = parseInstant(d.start_time);
-  if (!start) return fail('start_time is missing or not an ISO-8601 date-time with a UTC offset.');
-  const end = parseInstant(d.end_time);
-  if (!end) return fail('end_time is missing or not an ISO-8601 date-time with a UTC offset.');
-  if (end.getTime() < start.getTime()) return fail('end_time is before start_time.');
+  const title = d[map.title];
+  if (typeof title !== 'string' || title.trim() === '') return fail(`${map.title} is missing.`);
+  const start = parseInstant(d[map.start]);
+  if (!start) return fail(`${map.start} is missing or not an ISO-8601 date-time with a UTC offset.`);
+  const end = parseInstant(d[map.end]);
+  if (!end) return fail(`${map.end} is missing or not an ISO-8601 date-time with a UTC offset.`);
+  if (end.getTime() < start.getTime()) return fail(`${map.end} is before ${map.start}.`);
 
-  const description = optionalString(d.description);
-  const location = optionalString(d.location);
-  const category = optionalString(d.category);
-  if (description === undefined) return fail('description must be text.');
-  if (location === undefined) return fail('location must be text.');
-  if (category === undefined) return fail('category must be text.');
+  const description = optionalString(d[map.description]);
+  const location = optionalString(d[map.location]);
+  const category = optionalString(d[map.category]);
+  if (description === undefined) return fail(`${map.description} must be text.`);
+  if (location === undefined) return fail(`${map.location} must be text.`);
+  if (category === undefined) return fail(`${map.category} must be text.`);
 
   return {
     ok: true,
     event: {
       id,
-      title: d.title.trim(),
+      title: title.trim(),
       description,
       start: start.toISOString(),
       end: end.toISOString(),
