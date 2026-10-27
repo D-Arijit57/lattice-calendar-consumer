@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: #fafafa;
+  color: #171717;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Buttons */
+.btn-primary, .btn-secondary, .btn-icon, .seg {
+  font-weight: 500;
+  font-size: 0.875rem;
+  border-radius: 0.5rem;
+  transition: background-color 120ms, color 120ms, border-color 120ms;
+  cursor: pointer;
+}
+.btn-primary:focus-visible, .btn-secondary:focus-visible, .btn-icon:focus-visible, .seg:focus-visible,
+.fc .fc-event:focus-visible, .fc a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.btn-primary { background: #171717; color: #fff; padding: 0.625rem 1rem; }
+.btn-primary:hover { background: #404040; }
+.btn-secondary { background: #fff; border: 1px solid #d4d4d4; padding: 0.4375rem 0.875rem; }
+.btn-secondary:hover:not(:disabled) { background: #f5f5f5; }
+.btn-secondary:disabled { color: #737373; cursor: progress; }
+.btn-icon { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; background: #fff; border: 1px solid #d4d4d4; }
+.btn-icon:hover { background: #f5f5f5; }
+.seg { padding: 0.375rem 0.875rem; color: #525252; }
+.seg[aria-pressed="true"] { background: #fff; color: #171717; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.label { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #737373; }
+
+/* Event details: side panel on wide screens, bottom sheet on narrow */
+.panel-backdrop { display: none; }
+.event-panel {
+  position: fixed; z-index: 30; background: #fff; border: 1px solid #e5e5e5;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.14); padding: 1.25rem; overflow-y: auto;
+  top: 9.5rem; right: 1.5rem; width: 22rem; max-height: calc(100dvh - 11rem); border-radius: 1rem;
+}
+@media (max-width: 1023px) {
+  .panel-backdrop { display: block; position: fixed; inset: 0; z-index: 20; background: rgb(0 0 0 / 0.35); border: 0; }
+  .event-panel { top: auto; right: 0; left: 0; bottom: 0; width: auto; max-height: 80dvh; border-radius: 1rem 1rem 0 0; padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); }
+}
+
+/* FullCalendar theme */
+.calendar-host .fc {
+  --fc-border-color: #e5e5e5;
+  --fc-today-bg-color: #eff6ff;
+  --fc-page-bg-color: #fff;
+  --fc-neutral-bg-color: #fafafa;
+  --fc-list-event-hover-bg-color: #f5f5f5;
+  --fc-now-indicator-color: #dc2626;
+  font-size: 0.875rem;
+}
+.fc .fc-col-header-cell-cushion, .fc .fc-daygrid-day-number { color: #404040; text-decoration: none; padding: 0.375rem 0.5rem; }
+.fc .fc-col-header-cell { background: #fafafa; }
+.fc .fc-col-header-cell-cushion { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.fc .fc-day-today .fc-daygrid-day-number { font-weight: 700; color: #1d4ed8; }
+.fc .fc-event { cursor: pointer; border-radius: 0.375rem; padding: 1px 2px; }
+.fc .fc-daygrid-event { font-weight: 500; }
+.fc .fc-list-event { cursor: pointer; }
+.fc .fc-list-day-cushion { background: #f5f5f5; }
+.fc .fc-list-day-text, .fc .fc-list-day-side-text { color: #171717; text-decoration: none; font-weight: 600; }
+.fc .fc-scrollgrid { border-radius: 0.75rem; overflow: hidden; }
+.fc .fc-list-empty { background: #fff; }
+@media (max-width: 639px) {
+  .fc .fc-col-header-cell-cushion { font-size: 0.6875rem; padding: 0.25rem 0; }
+  .fc .fc-timegrid-slot-label-cushion { font-size: 0.6875rem; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
