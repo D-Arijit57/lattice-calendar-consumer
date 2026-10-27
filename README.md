@@ -49,6 +49,16 @@ Lattice does not validate the time strings. This app does: entries whose times l
 - Refresh: server cache of 30 s; the UI reloads on tab focus after 30 s and via the Refresh button (which bypasses the cache, at most once per 5 s). Lattice allows 60 requests/min per key.
 - `.ics` is generated in the browser from already-loaded data (UTC times, RFC 5545 escaping/folding).
 
+## Deploy on Vercel
+
+`api/events.ts` is a Vercel Function that serves `/api/events` using the same code as the Node server; Vercel auto-detects Vite for the UI.
+
+1. Import this repo in Vercel.
+2. Add environment variables (Settings -> Environment Variables): `LATTICE_API_BASE_URL`, `LATTICE_API_KEY`, `LATTICE_EVENT_CONTENT_TYPE`. Never use a `VITE_` prefix: that would put the key in the browser bundle.
+3. Deploy, then open `/api/events` to check it returns JSON.
+
+The 30 s cache is per warm function instance. The function itself has only been unit-tested locally; the first Vercel deploy is its real test.
+
 ## Commands
 
 `npm test` (vitest) · `npm run lint` (tsc) · `npm run build`
