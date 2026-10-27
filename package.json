@@ -3,16 +3,19 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite --port=3001",
-    "build": "vite build",
+    "build": "vite build && npm run bundle:api",
     "start": "tsx server/index.ts",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "seed": "tsx scripts/seed-lattice.ts"
+    "seed": "tsx scripts/seed-lattice.ts",
+    "bundle:api": "node scripts/bundle-api.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "6.1.22",
@@ -32,6 +35,7 @@
     "@types/react-dom": "^19.0.1",
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.1.0",
+    "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",

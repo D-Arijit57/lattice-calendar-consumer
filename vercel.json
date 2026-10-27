@@ -1,4 +1,10 @@
 {
-  "functions": { "api/events.ts": { "maxDuration": 30 },
-    "api/types.ts": { "maxDuration": 30 } }
+  "functions": {
+    "api/events.js": {
+      "maxDuration": 30
+    },
+    "api/types.js": {
+      "maxDuration": 30
+    }
+  }
 }

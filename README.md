@@ -60,13 +60,13 @@ Lattice does not validate the time strings. This app does: entries whose times l
 
 ## Deploy on Vercel
 
-`api/events.ts` is a Vercel Function that serves `/api/events` using the same code as the Node server; Vercel auto-detects Vite for the UI.
+`api/events.js` and `api/types.js` are Vercel Functions built from the same code as the Node server (`server/vercel-entry.ts`, bundled by esbuild into self-contained files). They are **committed build output**: after changing anything under `server/` or `shared/`, run `npm run bundle:api` (`npm run build` does it too) and commit the result; `npm test` fails if they are stale. Vercel auto-detects Vite for the UI.
 
 1. Import this repo in Vercel.
 2. Add environment variables (Settings -> Environment Variables): `LATTICE_API_BASE_URL`, `LATTICE_API_KEY`, `LATTICE_EVENT_CONTENT_TYPE`. Never use a `VITE_` prefix: that would put the key in the browser bundle.
 3. Deploy, then open `/api/events` to check it returns JSON.
 
-The 30 s cache is per warm function instance. The function itself has only been unit-tested locally; the first Vercel deploy is its real test (`api/events.ts` and `api/types.ts`).
+The 30 s cache is per warm function instance. The function itself has only been unit-tested locally; the first Vercel deploy is its real test (`api/events.js` and `api/types.js`).
 
 ## Commands
 
